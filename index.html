@@ -515,6 +515,11 @@ document.getElementById("reset").onclick=()=>{
 
 // --- 初期化呼び出し ---
 init();
+  // --- スクロール抑制 ---
+boardEl.addEventListener("touchmove", e=>{
+  e.preventDefault(); // これで縦スワイプでも画面はスクロールしない
+}, { passive: false });
+
 // --- タッチ操作で盤面スライド（追加機能） ---
 let touchStartX=0, touchStartY=0;
 const swipeThreshold=30; // スワイプ判定の最小距離
