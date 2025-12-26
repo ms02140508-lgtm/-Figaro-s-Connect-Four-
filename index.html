@@ -282,18 +282,25 @@ function init(){
   render();
 }
 
-// --- セル描画・更新関数 ---
 function cellEl(r,c){ return document.getElementById("board").children[r*N+c]; }
+
 function render(){
   for(let r=0;r<N;r++){
     for(let c=0;c<N;c++){
       const el=cellEl(r,c);
       const d=board[r][c];
-      el.className="cell"; el.textContent="";
-      if(d.ruined){ el.classList.add("ruined"); continue; }
+
+      el.className="cell";
+      el.textContent="";
+
+      if(d.ruined){
+        el.classList.add("ruined");
+        continue;
+      }
       if(d.val==="#") el.classList.add("block");
-      if(d.val==="O"){ el.textContent="〇"; el.classList.add("mark-o"); }
-      if(d.val==="X"){ el.textContent="✕"; el.classList.add("mark-x"); }
+      if(d.val==="O"){el.textContent="〇"; el.classList.add("mark-o");}
+      if(d.val==="X"){el.textContent="✕"; el.classList.add("mark-x");}
+
       if(d.protect){
         const o=document.createElement("div");
         o.className="protect-overlay";
@@ -307,6 +314,7 @@ function updateTurn(){
   const info=document.getElementById("turnInfo");
   document.body.classList.remove("turn-o","turn-x");
   document.body.classList.add(current==="O"?"turn-o":"turn-x");
+
   if(phase==="mine"){
     info.textContent=`地雷配置：${current==="O"?"〇":"✕"}`;
   }else if(!gameOver){
@@ -314,12 +322,52 @@ function updateTurn(){
   }
 }
 
+// --- ボード満杯チェック & 空白化 ---
+function isBoardFull(){
+  for(let r=0;r<N;r++){
+    for(let c=0;c<N;c++){
+      const d=board[r][c];
+      if(d.ruined) continue;
+      if(d.val==="") return false;
+    }
+  }
+  return true;
+}
+
+function openRandomCells(count=10){
+  const candidates=[];
+  for(let r=0;r<N;r++){
+    for(let c=0;c<N;c++){
+      const d=board[r][c];
+      if(d.ruined) continue;
+      candidates.push([r,c]);
+    }
+  }
+  for(let i=candidates.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [candidates[i],candidates[j]]=[candidates[j],candidates[i]];
+  }
+  for(let i=0;i<Math.min(count,candidates.length);i++){
+    const [r,c]=candidates[i];
+    board[r][c].val="";
+    board[r][c].protect=false;
+  }
+  render();
+}
+
+function nextTurn(){
+  current=current==="O"?"X":"O";
+  usedSkillThisTurn=false;
+  updateTurn();
+  if(isBoardFull()) openRandomCells(10);
+}
+
 // --- 勝利判定 ---
 function checkWin(r,c){
   const dirs=[[1,0],[0,1],[1,1],[1,-1]];
-  for(const [dR,dC] of dirs){
+  for(const[dR,dC] of dirs){
     let cells=[[r,c]];
-    let rr=r+dR, cc=c+dC;
+    let rr=r+dR,cc=c+dC;
     while(true){
       rr=(rr+N)%N; cc=(cc+N)%N;
       if(board[rr][cc].val===current) cells.push([rr,cc]); else break;
@@ -342,10 +390,26 @@ function checkWin(r,c){
 }
 
 // --- 地雷処理 ---
-function isMine(r,c){ return (mines.O && mines.O.r===r && mines.O.c===c) || (mines.X && mines.X.r===r && mines.X.c===c); }
-function clearMine(r,c){ if(mines.O && mines.O.r===r && mines.O.c===c) mines.O=null; if(mines.X && mines.X.r===r && mines.X.c===c) mines.X=null; }
-function explode(r,c){ const el=cellEl(r,c); el.classList.add("explode"); setTimeout(()=>{ el.classList.remove("explode"); board[r][c].ruined=true; render(); },450); }
-function triggerMine(r,c){ if(!isMine(r,c)) return false; clearMine(r,c); explode(r,c); nextTurn(); return true; }
+function isMine(r,c){
+  return (mines.O && mines.O.r===r && mines.O.c===c) ||
+         (mines.X && mines.X.r===r && mines.X.c===c);
+}
+function clearMine(r,c){
+  if(mines.O && mines.O.r===r && mines.O.c===c) mines.O=null;
+  if(mines.X && mines.X.r===r && mines.X.c===c) mines.X=null;
+}
+function explode(r,c){
+  const el=cellEl(r,c);
+  el.classList.add("explode");
+  setTimeout(()=>{ el.classList.remove("explode"); board[r][c].ruined=true; render(); },450);
+}
+function triggerMine(r,c){
+  if(!isMine(r,c)) return false;
+  clearMine(r,c);
+  explode(r,c);
+  nextTurn();
+  return true;
+}
 
 // --- セルクリック ---
 function cellClick(r,c){
@@ -365,88 +429,150 @@ function cellClick(r,c){
   if(triggerMine(r,c)) return;
 
   const mode=skill[current].mode;
-  if(usedSkillThisTurn && mode){ const el=cellEl(r,c); el.classList.add("shake"); setTimeout(()=>el.classList.remove("shake"),350); return; }
+  if(usedSkillThisTurn && mode){
+    const el=cellEl(r,c);
+    el.classList.add("shake");
+    setTimeout(()=>el.classList.remove("shake"),350);
+    return;
+  }
 
-  if(mode==="block"){ if(d.val==="O"||d.val==="X"||d.ruined) return; d.val="#"; skill[current].block--; skill[current].mode=null; usedSkillThisTurn=true; render(); updateSkillButtons(); return; }
-  if(mode==="override"){ if(d.protect || d.val===current){ const el=cellEl(r,c); el.classList.add("shake"); setTimeout(()=>el.classList.remove("shake"),350); return; } if(d.val===""||d.val==="#"||d.ruined) return; d.val=current; d.protect=false; skill[current].override--; skill[current].mode=null; usedSkillThisTurn=true; render(); updateSkillButtons(); if(checkWin(r,c)) return; nextTurn(); return; }
-  if(mode==="protect"){ if(d.val!==""||d.val==="#") return; d.val=current; d.protect=true; skill[current].protect--; skill[current].mode=null; usedSkillThisTurn=true; render(); updateSkillButtons(); if(checkWin(r,c)) return; nextTurn(); return; }
+  if(mode==="block"){
+    if(d.val==="O"||d.val==="X"||d.ruined) return;
+    d.val="#"; skill[current].block--; skill[current].mode=null; usedSkillThisTurn=true;
+    render(); updateSkillButtons(); return;
+  }
+
+  if(mode==="override"){
+    if(d.protect || d.val===current){ const el=cellEl(r,c); el.classList.add("shake"); setTimeout(()=>el.classList.remove("shake"),350); return; }
+    if(d.val===""||d.val==="#"||d.ruined) return;
+    d.val=current; d.protect=false; skill[current].override--; skill[current].mode=null; usedSkillThisTurn=true;
+    render(); updateSkillButtons(); if(checkWin(r,c)) return; nextTurn(); return;
+  }
+
+  if(mode==="protect"){
+    if(d.val!==""||d.val==="#") return;
+    d.val=current; d.protect=true; skill[current].protect--; skill[current].mode=null; usedSkillThisTurn=true;
+    render(); updateSkillButtons(); if(checkWin(r,c)) return; nextTurn(); return;
+  }
 
   if(d.val!==""||d.val==="#"||d.ruined) return;
   d.val=current; d.protect=false;
   render(); if(checkWin(r,c)) return; nextTurn();
 }
 
-// --- スワイプ機能 ---
-let touchStartX=0, touchStartY=0;
-const swipeThreshold=30;
-const boardContainer=document.getElementById("board");
-boardContainer.addEventListener("touchmove", e=>{ e.preventDefault(); }, { passive:false });
-boardContainer.addEventListener("touchstart", e=>{ touchStartX=e.touches[0].clientX; touchStartY=e.touches[0].clientY; });
-boardContainer.addEventListener("touchend", e=>{
-  const dx=e.changedTouches[0].clientX - touchStartX;
-  const dy=e.changedTouches[0].clientY - touchStartY;
-  if(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>swipeThreshold){ dx>0?shiftBoard("right"):shiftBoard("left"); }
-  else if(Math.abs(dy)>swipeThreshold){ dy>0?shiftBoard("down"):shiftBoard("up"); }
-});
-function shiftBoard(dir){
-  if(gameOver || phase==="mine") return;
-  if(dir==="left"){ for(let r=0;r<N;r++){ board[r].push(board[r].shift()); } }
-  else if(dir==="right"){ for(let r=0;r<N;r++){ board[r].unshift(board[r].pop()); } }
-  else if(dir==="up"){ board.push(board.shift()); }
-  else if(dir==="down"){ board.unshift(board.pop()); }
-  render();
+// --- テーマ切替 ---
+const themeBtn=document.getElementById("modeBtn");
+themeBtn.onclick=()=>{document.body.classList.toggle("light"); themeBtn.textContent=document.body.classList.contains("light")?"☀️":"🌙";};
+
+// --- スキルボタン ---
+function updateSkillButtons(){
+  xBlockB.textContent=skill.X.block; xOverrideB.textContent=skill.X.override; xProtectB.textContent=skill.X.protect;
+  oBlockB.textContent=skill.O.block; oOverrideB.textContent=skill.O.override; oProtectB.textContent=skill.O.protect;
+
+  [xBlock,xOverride,xProtect,oBlock,oOverride,oProtect].forEach(btn=>btn.disabled=false);
+  if(skill.X.block===0)xBlock.disabled=true; if(skill.X.override===0)xOverride.disabled=true; if(skill.X.protect===0)xProtect.disabled=true;
+  if(skill.O.block===0)oBlock.disabled=true; if(skill.O.override===0)oOverride.disabled=true; if(skill.O.protect===0)oProtect.disabled=true;
 }
 
-// --- 強いAI + スキル/地雷使用 ---
-function nextTurn(){
-  current=current==="O"?"X":"O";
-  usedSkillThisTurn=false;
-  updateTurn();
-  if(isBoardFull()) openRandomCells(10);
-  if(!gameOver && current==="X") setTimeout(computerMove, 400);
+function clearActive(){ [xBlock,xOverride,xProtect,oBlock,oOverride,oProtect].forEach(b=>b.classList.remove("active")); }
+
+const xBlock=document.getElementById("x-block");
+const xOverride=document.getElementById("x-override");
+const xProtect=document.getElementById("x-protect");
+const oBlock=document.getElementById("o-block");
+const oOverride=document.getElementById("o-override");
+const oProtect=document.getElementById("o-protect");
+
+const xBlockB=document.getElementById("x-block-b");
+const xOverrideB=document.getElementById("x-override-b");
+const xProtectB=document.getElementById("x-protect-b");
+const oBlockB=document.getElementById("o-block-b");
+const oOverrideB=document.getElementById("o-override-b");
+const oProtectB=document.getElementById("o-protect-b");
+
+function bind(btn,p,t){
+  btn.onclick=()=>{
+    if(gameOver||phase==="mine")return;
+    if(current!==p)return;
+    if(usedSkillThisTurn)return;
+    if(skill[p][t]<=0)return;
+    skill[p].mode=(skill[p].mode===t)?null:t;
+    clearActive();
+    if(skill[p].mode===t)btn.classList.add("active");
+  };
 }
 
-function computerMove(){
-  if(gameOver) return;
+bind(xBlock,"X","block"); bind(xOverride,"X","override"); bind(xProtect,"X","protect");
+bind(oBlock,"O","block"); bind(oOverride,"O","override"); bind(oProtect,"O","protect");
 
-  // --- 1. 勝利狙い ---
-  for(let r=0;r<N;r++){ for(let c=0;c<N;c++){ if(board[r][c].val===""){ board[r][c].val="X"; if(checkWin(r,c)) return; board[r][c].val=""; } } }
-
-  // --- 2. 相手阻止 ---
-  for(let r=0;r<N;r++){ for(let c=0;c<N;c++){ if(board[r][c].val===""){ board[r][c].val="O"; if(checkWin(r,c)){ board[r][c].val="X"; render(); nextTurn(); return; } board[r][c].val=""; } } }
-
-  // --- 3. スキル使用 ---
-  // override: 自分の連続を作る
-  if(skill.X.override>0){
-    for(let r=0;r<N;r++){ for(let c=0;c<N;c++){
-      if(board[r][c].val==="O" && !board[r][c].protect){ board[r][c].val="X"; skill.X.override--; render(); if(!checkWin(r,c)) nextTurn(); return; }
-    }}
+// --- リセット（確認付き） ---
+document.getElementById("reset").onclick=()=>{
+  if(confirm("本当にリセットしますか？")){
+    skill={O:{block:1,override:1,protect:1,mode:null},X:{block:1,override:1,protect:1,mode:null}};
+    init();
   }
-  // protect: 有利なセルを守る
-  if(skill.X.protect>0){
-    for(let r=0;r<N;r++){ for(let c=0;c<N;c++){
-      if(board[r][c].val==="X" && !board[r][c].protect){ board[r][c].protect=true; skill.X.protect--; render(); if(!checkWin(r,c)) nextTurn(); return; }
-    }}
-  }
-  // block: 相手が有利な空セルを塞ぐ
-  if(skill.X.block>0){
-    for(let r=0;r<N;r++){ for(let c=0;c<N;c++){
-      if(board[r][c].val===""){ board[r][c].val="#"; skill.X.block--; render(); nextTurn(); return; }
-    }}
-  }
-
-  // --- 4. 中央・角優先 ---
-  const priority=[[3,3],[0,0],[0,6],[6,0],[6,6]];
-  for(const [r,c] of priority){ if(board[r][c].val===""){ board[r][c].val="X"; render(); if(!checkWin(r,c)) nextTurn(); return; } }
-
-  // --- 5. 空セルランダム ---
-  const empty=[];
-  for(let r=0;r<N;r++){ for(let c=0;c<N;c++){ if(board[r][c].val==="") empty.push([r,c]); } }
-  if(empty.length>0){ const [r,c]=empty[Math.floor(Math.random()*empty.length)]; board[r][c].val="X"; render(); if(!checkWin(r,c)) nextTurn(); }
-}
+};
 
 // --- 初期化呼び出し ---
 init();
+ // --- タッチ操作での盤面スライド（完全版追加機能） ---
+let touchStartX=0, touchStartY=0;
+const swipeThreshold=30; // スワイプ判定の最小距離
+
+const boardEl=document.getElementById("board");
+
+// --- 縦スクロール抑制 ---
+boardEl.addEventListener("touchmove", e=>{
+  e.preventDefault(); // これで画面全体が上下に動かない
+}, { passive: false });
+
+// --- タッチ開始 ---
+boardEl.addEventListener("touchstart", e=>{
+  const t=e.touches[0];
+  touchStartX=t.clientX;
+  touchStartY=t.clientY;
+});
+
+// --- タッチ終了でスワイプ判定 ---
+boardEl.addEventListener("touchend", e=>{
+  const t=e.changedTouches[0];
+  const dx=t.clientX - touchStartX;
+  const dy=t.clientY - touchStartY;
+
+  if(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>swipeThreshold){
+    if(dx>0) shiftBoard("right");
+    else shiftBoard("left");
+  }else if(Math.abs(dy)>swipeThreshold){
+    if(dy>0) shiftBoard("down");
+    else shiftBoard("up");
+  }
+});
+
+// --- 盤面をループ移動する関数 ---
+function shiftBoard(dir){
+  if(gameOver || phase==="mine") return;
+
+  if(dir==="left"){
+    for(let r=0;r<N;r++){
+      const first=board[r].shift();
+      board[r].push(first);
+    }
+  }else if(dir==="right"){
+    for(let r=0;r<N;r++){
+      const last=board[r].pop();
+      board[r].unshift(last);
+    }
+  }else if(dir==="up"){
+    const firstRow=board.shift();
+    board.push(firstRow);
+  }else if(dir==="down"){
+    const lastRow=board.pop();
+    board.unshift(lastRow);
+  }
+
+  render();
+}
+
 
 // --- PWA Service Worker ---
 if ("serviceWorker" in navigator) {
@@ -458,3 +584,4 @@ if ("serviceWorker" in navigator) {
 
 </body>
 </html>
+
