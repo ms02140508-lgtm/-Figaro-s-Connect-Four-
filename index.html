@@ -282,6 +282,222 @@ function init(){
   render();
 }
 
+// --- セル描画・更新関数 ---
+function cellEl(r,c){ return document.getElementById("board").children[r*N+c]; }
+function render(){
+  for(let r=0;r<N;r++){
+    for(let c=0;c<N;c++){
+      const el=cellEl(r,c);
+      const d=board[r][c];
+      el.className="cell"; el.textContent="";
+      if(d.ruined){ el.classList.add("ruined"); continue; }
+      if(d.val==="#") el.classList.add("block");
+      if(d.val==="O"){ el.textContent="〇"; el.classList.add("mark-o"); }
+      if(d.val==="X"){ el.textContent="✕"; el.classList.add("mark-x"); }
+      if(d.protect){
+        const o=document.createElement("div");
+        o.className="protect-overlay";
+        el.appendChild(o);
+      }
+    }
+  }
+}
+
+function updateTurn(){
+  const info=document.getElementById("turnInfo");
+  document.body.classList.remove("turn-o","turn-x");
+  document.body.classList.add(current==="O"?"turn-o":"turn-x");
+  if(phase==="mine"){
+    info.textContent=`地雷配置：${current==="O"?"〇":"✕"}`;
+  }else if(!gameOver){
+    info.textContent=`手番：${current==="O"?"〇":"✕"}`;
+  }
+}
+
+// --- 勝利判定 ---
+function checkWin(r,c){
+  const dirs=[[1,0],[0,1],[1,1],[1,-1]];
+  for(const [dR,dC] of dirs){
+    let cells=[[r,c]];
+    let rr=r+dR, cc=c+dC;
+    while(true){
+      rr=(rr+N)%N; cc=(cc+N)%N;
+      if(board[rr][cc].val===current) cells.push([rr,cc]); else break;
+      rr+=dR; cc+=dC;
+    }
+    rr=r-dR; cc=c-dC;
+    while(true){
+      rr=(rr+N)%N; cc=(cc+N)%N;
+      if(board[rr][cc].val===current) cells.push([rr,cc]); else break;
+      rr-=dR; cc-=dC;
+    }
+    if(cells.length>=4){
+      cells.forEach(([r,c])=>cellEl(r,c).classList.add("win"));
+      document.getElementById("turnInfo").textContent=`${current==="O"?"〇":"✕"} の勝利！`;
+      gameOver=true;
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- 地雷処理 ---
+function isMine(r,c){ return (mines.O && mines.O.r===r && mines.O.c===c) || (mines.X && mines.X.r===r && mines.X.c===c); }
+function clearMine(r,c){ if(mines.O && mines.O.r===r && mines.O.c===c) mines.O=null; if(mines.X && mines.X.r===r && mines.X.c===c) mines.X=null; }
+function explode(r,c){ const el=cellEl(r,c); el.classList.add("explode"); setTimeout(()=>{ el.classList.remove("explode"); board[r][c].ruined=true; render(); },450); }
+function triggerMine(r,c){ if(!isMine(r,c)) return false; clearMine(r,c); explode(r,c); nextTurn(); return true; }
+
+// --- セルクリック ---
+function cellClick(r,c){
+  if(gameOver) return;
+  const d=board[r][c];
+  if(d.ruined) return;
+
+  if(phase==="mine"){
+    if(!mines[current]){
+      mines[current]={r,c};
+      if(mines.O && mines.X){ phase="play"; current="O"; usedSkillThisTurn=false; updateTurn();}
+      else nextTurn();
+    }
+    return;
+  }
+
+  if(triggerMine(r,c)) return;
+
+  const mode=skill[current].mode;
+  if(usedSkillThisTurn && mode){ const el=cellEl(r,c); el.classList.add("shake"); setTimeout(()=>el.classList.remove("shake"),350); return; }
+
+  if(mode==="block"){ if(d.val==="O"||d.val==="X"||d.ruined) return; d.val="#"; skill[current].block--; skill[current].mode=null; usedSkillThisTurn=true; render(); updateSkillButtons(); return; }
+  if(mode==="override"){ if(d.protect || d.val===current){ const el=cellEl(r,c); el.classList.add("shake"); setTimeout(()=>el.classList.remove("shake"),350); return; } if(d.val===""||d.val==="#"||d.ruined) return; d.val=current; d.protect=false; skill[current].override--; skill[current].mode=null; usedSkillThisTurn=true; render(); updateSkillButtons(); if(checkWin(r,c)) return; nextTurn(); return; }
+  if(mode==="protect"){ if(d.val!==""||d.val==="#") return; d.val=current; d.protect=true; skill[current].protect--; skill[current].mode=null; usedSkillThisTurn=true; render(); updateSkillButtons(); if(checkWin(r,c)) return; nextTurn(); return; }
+
+  if(d.val!==""||d.val==="#"||d.ruined) return;
+  d.val=current; d.protect=false;
+  render(); if(checkWin(r,c)) return; nextTurn();
+}
+
+// --- スワイプ機能 ---
+let touchStartX=0, touchStartY=0;
+const swipeThreshold=30;
+const boardContainer=document.getElementById("board");
+boardContainer.addEventListener("touchmove", e=>{ e.preventDefault(); }, { passive:false });
+boardContainer.addEventListener("touchstart", e=>{ touchStartX=e.touches[0].clientX; touchStartY=e.touches[0].clientY; });
+boardContainer.addEventListener("touchend", e=>{
+  const dx=e.changedTouches[0].clientX - touchStartX;
+  const dy=e.changedTouches[0].clientY - touchStartY;
+  if(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>swipeThreshold){ dx>0?shiftBoard("right"):shiftBoard("left"); }
+  else if(Math.abs(dy)>swipeThreshold){ dy>0?shiftBoard("down"):shiftBoard("up"); }
+});
+function shiftBoard(dir){
+  if(gameOver || phase==="mine") return;
+  if(dir==="left"){ for(let r=0;r<N;r++){ board[r].push(board[r].shift()); } }
+  else if(dir==="right"){ for(let r=0;r<N;r++){ board[r].unshift(board[r].pop()); } }
+  else if(dir==="up"){ board.push(board.shift()); }
+  else if(dir==="down"){ board.unshift(board.pop()); }
+  render();
+}
+
+// --- 強いAI + スキル/地雷使用 ---
+function nextTurn(){
+  current=current==="O"?"X":"O";
+  usedSkillThisTurn=false;
+  updateTurn();
+  if(isBoardFull()) openRandomCells(10);
+  if(!gameOver && current==="X") setTimeout(computerMove, 400);
+}
+
+function computerMove(){
+  if(gameOver) return;
+
+  // --- 1. 勝利狙い ---
+  for(let r=0;r<N;r++){ for(let c=0;c<N;c++){ if(board[r][c].val===""){ board[r][c].val="X"; if(checkWin(r,c)) return; board[r][c].val=""; } } }
+
+  // --- 2. 相手阻止 ---
+  for(let r=0;r<N;r++){ for(let c=0;c<N;c++){ if(board[r][c].val===""){ board[r][c].val="O"; if(checkWin(r,c)){ board[r][c].val="X"; render(); nextTurn(); return; } board[r][c].val=""; } } }
+
+  // --- 3. スキル使用 ---
+  // override: 自分の連続を作る
+  if(skill.X.override>0){
+    for(let r=0;r<N;r++){ for(let c=0;c<N;c++){
+      if(board[r][c].val==="O" && !board[r][c].protect){ board[r][c].val="X"; skill.X.override--; render(); if(!checkWin(r,c)) nextTurn(); return; }
+    }}
+  }
+  // protect: 有利なセルを守る
+  if(skill.X.protect>0){
+    for(let r=0;r<N;r++){ for(let c=0;c<N;c++){
+      if(board[r][c].val==="X" && !board[r][c].protect){ board[r][c].protect=true; skill.X.protect--; render(); if(!checkWin(r,c)) nextTurn(); return; }
+    }}
+  }
+  // block: 相手が有利な空セルを塞ぐ
+  if(skill.X.block>0){
+    for(let r=0;r<N;r++){ for(let c=0;c<N;c++){
+      if(board[r][c].val===""){ board[r][c].val="#"; skill.X.block--; render(); nextTurn(); return; }
+    }}
+  }
+
+  // --- 4. 中央・角優先 ---
+  const priority=[[3,3],[0,0],[0,6],[6,0],[6,6]];
+  for(const [r,c] of priority){ if(board[r][c].val===""){ board[r][c].val="X"; render(); if(!checkWin(r,c)) nextTurn(); return; } }
+
+  // --- 5. 空セルランダム ---
+  const empty=[];
+  for(let r=0;r<N;r++){ for(let c=0;c<N;c++){ if(board[r][c].val==="") empty.push([r,c]); } }
+  if(empty.length>0){ const [r,c]=empty[Math.floor(Math.random()*empty.length)]; board[r][c].val="X"; render(); if(!checkWin(r,c)) nextTurn(); }
+}
+
+// --- 初期化呼び出し ---
+init();
+
+// --- 変数・初期状態 ---
+const N=7;
+let board=[];
+let current="O";
+let gameOver=false;
+let phase="mine";
+let usedSkillThisTurn=false;
+let mines={O:null,X:null};
+let skill={
+  O:{block:1,override:1,protect:1,mode:null},
+  X:{block:1,override:1,protect:1,mode:null}
+};
+
+// --- 初期化 ---
+function init(){
+  const b=document.getElementById("board");
+  b.innerHTML="";
+  board=[];
+  current="O";
+  gameOver=false;
+  phase="mine";
+  usedSkillThisTurn=false;
+  mines={O:null,X:null};
+
+  for(let r=0;r<N;r++){
+    board[r]=[];
+    for(let c=0;c<N;c++){
+      board[r][c]={val:"",protect:false,ruined:false};
+      const el=document.createElement("div");
+      el.className="cell";
+      el.onclick=()=>cellClick(r,c);
+      b.appendChild(el);
+    }
+  }
+
+  let k=0;
+  while(k<10){
+    const r=Math.floor(Math.random()*N);
+    const c=Math.floor(Math.random()*N);
+    if(board[r][c].val===""){
+      board[r][c].val="#";
+      k++;
+    }
+  }
+
+  updateTurn();
+  updateSkillButtons();
+  render();
+}
+
 function cellEl(r,c){ return document.getElementById("board").children[r*N+c]; }
 
 function render(){
